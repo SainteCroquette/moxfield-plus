@@ -110,12 +110,8 @@
 
     function attachShortcutsListeners() {
         document.addEventListener('keydown', function(event) {
-            // Check if the required keys are pressed
             if (TOGGLE_FOIL_SHORTCUT(event)) {
-                // Prevent the default action (optional)
                 event.preventDefault();
-
-                // Call your callback function
                 toggleFoil();
             }
         });
