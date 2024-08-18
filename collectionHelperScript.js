@@ -1,10 +1,9 @@
 // ==UserScript==
 // @name         Collection helper
-// @namespace    http://saintecroquette.dev/
+// @namespace    https://github.com/SainteCroquette
 // @version      2024-08-17
 // @description  try to take over the world!
 // @author       You
-// matches collection page or binder page
 // @match        https://www.moxfield.com/binders/*
 // @match        https://www.moxfield.com/collection
 // @icon         data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==
@@ -17,13 +16,17 @@
     const SEARCH_INPUT_SELECTOR = '#collectionSearch';
     const MODAL_SAVE_BUTTON_SELECTOR = '.modal-footer .btn:nth-child(2)';
 
+
+    //update this to match your desired shortcut, see event.key at https://keycode.info/
     //const TOGGLE_FOIL_SHORTCUT = event => event.shiftKey && event.key === 'F';
     const TOGGLE_FOIL_SHORTCUT = event => event.key === 'End';
 
+    //update this to match your default query, then reload page
     const DEFAULT_QUERY = 's:one cn:';
 
     console.log("Collection Helper script enabled.");
 
+    // helper function to wait for an element to appear in the DOM
     function waitForElement(query, callback, interval = 100) {
         const checkExistence = setInterval(() => {
             const element = document.querySelector(query);
@@ -34,6 +37,7 @@
         }, interval);
     }
 
+    // helper function to wait for an element to disappear from the DOM
     function waitForElementDisappear(query, callback, interval = 100) {
         const checkExistence = setInterval(() => {
             const element = document.querySelector(query);
@@ -44,12 +48,12 @@
         }, interval);
     }
 
+    //Restore the default query in the search input
     function restoreDefaultQuery(searchInput) {
         if (searchInput) {
             searchInput.value = DEFAULT_QUERY;
         }
     }
-
 
     function attachSaveButtonAppearsListener() {
 
@@ -70,6 +74,7 @@
         });
     }
 
+    // Toggle foil on the current modal
     function toggleFoil() {
         console.log('foils !!!');
         const select = document.querySelector('#finish');
@@ -84,16 +89,6 @@
         }
     }
 
-    document.addEventListener('keydown', function(event) {
-        // Check if the required keys are pressed
-        if (TOGGLE_FOIL_SHORTCUT(event)) {
-            // Prevent the default action (optional)
-            event.preventDefault();
-
-            // Call your callback function
-            toggleFoil();
-        }
-    });
 
     function attachSearchInputDisappearListener() {
         waitForElementDisappear(SEARCH_INPUT_SELECTOR, () => {
@@ -113,5 +108,19 @@
 
     }
 
+    function attachShortcutsListeners() {
+        document.addEventListener('keydown', function(event) {
+            // Check if the required keys are pressed
+            if (TOGGLE_FOIL_SHORTCUT(event)) {
+                // Prevent the default action (optional)
+                event.preventDefault();
+
+                // Call your callback function
+                toggleFoil();
+            }
+        });
+    }
+
+    attachShortcutsListeners();
     attachSearchInputAppearListener();
 })();
