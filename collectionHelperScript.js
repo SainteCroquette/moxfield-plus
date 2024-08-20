@@ -22,7 +22,7 @@
     const TOGGLE_FOIL_SHORTCUT = event => event.key === 'End';
 
     //update this to match your default query, then reload page
-    let DEFAULT_QUERY = 's:one cn:';
+    let DEFAULT_QUERY = 's:one in:paper cn:';
     let DEFAULT_LANGUAGE = '';
 
     console.log("Collection Helper script enabled.");
@@ -151,6 +151,7 @@
             const searchINput = document.querySelector(SEARCH_INPUT_SELECTOR);
 
             restoreDefaultQuery(searchINput);
+            attachLanguageSelectListener();
             attachSaveButtonAppearsListener();
         });
     }
