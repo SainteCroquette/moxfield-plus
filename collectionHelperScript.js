@@ -25,7 +25,7 @@
     let DEFAULT_QUERY = 's:one in:paper cn:';
     let DEFAULT_LANGUAGE = '';
 
-    console.log("Collection Helper script enabled.");
+    console.log("Collection Helper script enabled on this page.");
 
     function createSettings() {
         const parentElement = document.createElement('div');
@@ -139,7 +139,6 @@
     function attachSaveButtonAppearsListener() {
 
         waitForElement(MODAL_SAVE_BUTTON_SELECTOR, (element) => {
-            console.log('Savebutton appears', element);
             attachSaveButtonDisappearsListener();
         });
     }
@@ -147,7 +146,6 @@
     function attachSaveButtonDisappearsListener() {
 
         waitForElementDisappear(MODAL_SAVE_BUTTON_SELECTOR, (element) => {
-            console.log('Savebutton disappear', element);
             const searchINput = document.querySelector(SEARCH_INPUT_SELECTOR);
 
             restoreDefaultQuery(searchINput);
@@ -158,7 +156,6 @@
 
 // Toggle foil on the current modal
     function toggleFoil() {
-        console.log('foils !!!');
         const select = document.querySelector('#finish');
 
         if (select) {
@@ -186,7 +183,6 @@
 
     function attachSearchInputDisappearListener() {
         waitForElementDisappear(SEARCH_INPUT_SELECTOR, () => {
-            console.log('Search input disappear');
             attachSearchInputAppearListener();
         });
 
@@ -200,7 +196,6 @@
 
     function attachSearchInputAppearListener() {
         waitForElement(SEARCH_INPUT_SELECTOR, (element) => {
-            console.log('Search input found:', element);
             restoreDefaultQuery(element);
             attachSaveButtonAppearsListener();
             attachLanguageSelectListener();
