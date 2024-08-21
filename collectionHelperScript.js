@@ -82,6 +82,7 @@
     function saveSettings(settings) {
         localStorage.setItem('collection-helper-default-query', settings.defaultQuery);
         localStorage.setItem('collection-helper-default-language', settings.defaultLanguage);
+        console.log('Settings saved', settings);
         loadSettings();
     }
 
@@ -96,7 +97,7 @@
 
         saveSettings({
             defaultQuery: newDefaultQuery || DEFAULT_QUERY,
-            defaultLanguage: newDefaultLanguage || DEFAULT_LANGUAGE
+            defaultLanguage: newDefaultLanguage
         })
     }
 
@@ -170,7 +171,7 @@
 
     function selectLanguage() {
         const element = document.querySelector('#language');
-        if (element && DEFAULT_LANGUAGE !== '') {
+        if (element && DEFAULT_LANGUAGE && DEFAULT_LANGUAGE !== '') {
             element.value = DEFAULT_LANGUAGE;
             const event = new Event('change', {
                 bubbles: true,
