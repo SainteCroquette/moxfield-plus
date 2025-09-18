@@ -2,7 +2,7 @@
 // @name         Moxfield Plus - Card Set Information
 // @namespace    https://github.com/SainteCroquette
 // @version      2.5.1
-// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting. Excludes basic lands. Displays real-time summary of all sets just before .deckview section.
+// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting. Excludes basic lands and digital-only sets (MTG Arena/Online). Displays real-time summary of all sets just before .deckview section.
 // @author       SainteCroquette
 // @match        https://www.moxfield.com/decks/*
 // @match        www.moxfield.com/decks/*
@@ -36,6 +36,12 @@
     
     // Cards to exclude from set fetching (basic lands)
     const EXCLUDED_CARDS = ['Forest', 'Mountain', 'Plains', 'Island', 'Swamp'];
+    
+    // Configuration: exclude digital-only sets (MTG Arena, MTG Online)
+    const EXCLUDE_DIGITAL_SETS = true; // Set to false to include digital-only sets
+    
+    // Track excluded digital sets for logging
+    let excludedDigitalSetsCount = 0;
     
     // Track all unique sets that have been fetched for the summary display
     const allFetchedSets = new Map();
@@ -200,12 +206,7 @@
                 }
             });
             
-            // Update summary in real-time if new sets were discovered
-            if (hasNewSets) {
-                setTimeout(() => {
-                    displaySetSummary();
-                }, 100); // Small delay to batch updates
-            }
+            // Note: Summary will be displayed after all cards are processed
             
             return cachedData;
         }
@@ -225,12 +226,7 @@
                 }
             });
             
-            // Update summary in real-time if new sets were discovered
-            if (hasNewSets) {
-                setTimeout(() => {
-                    displaySetSummary();
-                }, 100); // Small delay to batch updates
-            }
+            // Note: Summary will be displayed after all cards are processed
             
             return cachedData;
         }
@@ -269,12 +265,19 @@
             for (const set of sets.values()) {
                 const setInfo = await fetchSetDetails(set.code);
                 if (setInfo) {
+                    // Filter out digital-only sets if configured to do so
+                    if (EXCLUDE_DIGITAL_SETS && setInfo.digital) {
+                        console.log(`Excluding digital-only set: ${setInfo.name} (${setInfo.code})`);
+                        excludedDigitalSetsCount++;
+                        continue;
+                    }
                     setDetails.push(setInfo);
                 } else {
                     // Fallback to basic info if set details fetch failed
                     setDetails.push({
                         ...set,
-                        iconUri: null
+                        iconUri: null,
+                        digital: false // Assume non-digital for fallback
                     });
                 }
             }
@@ -292,12 +295,7 @@
                 }
             });
             
-            // Update summary in real-time if new sets were discovered
-            if (hasNewSets) {
-                setTimeout(() => {
-                    displaySetSummary();
-                }, 100); // Small delay to batch updates
-            }
+            // Note: Summary will be displayed after all cards are processed
             
             // Cache the result in memory
             cardSetCache.set(cardName, setList);
@@ -383,7 +381,8 @@
                 code: setData.code,
                 name: setData.name,
                 iconUri: setData.icon_svg_uri,
-                releaseDate: setData.released_at
+                releaseDate: setData.released_at,
+                digital: setData.digital || false
             };
             
             // Cache the result in memory
@@ -392,12 +391,9 @@
             // Cache the result persistently
             setCache('set_details', setCode, setInfo);
             
-            // Add to global sets map and update summary if it's a new set
+            // Add to global sets map for summary display
             if (setInfo && setInfo.iconUri && !allFetchedSets.has(setCode)) {
                 allFetchedSets.set(setCode, setInfo);
-                setTimeout(() => {
-                    displaySetSummary();
-                }, 100); // Small delay to batch updates
             }
             
             return setInfo;
@@ -432,10 +428,14 @@
     
     // Function to update visual states of all set icons
     function updateSetIconStates() {
-        // Update all set icons in card displays
+        // Update all set icons in card displays (only visible ones)
         document.querySelectorAll('.set-icon').forEach(icon => {
             const setCode = icon.getAttribute('data-set-code');
             if (setCode) {
+                // Check if the parent <li> is visible
+                const listItem = icon.closest('li');
+                const isVisible = !listItem || listItem.style.display !== 'none';
+                
                 if (activeSetCode === null) {
                     // No filter active - show all icons normally
                     icon.style.opacity = '1';
@@ -447,13 +447,14 @@
                     icon.style.filter = 'none';
                     icon.style.border = '2px solid #007bff';
                     icon.style.boxShadow = '0 0 5px rgba(0, 123, 255, 0.5)';
-                } else {
-                    // This is not the active set - gray it out
+                } else if (isVisible) {
+                    // This is not the active set but is visible - gray it out
                     icon.style.opacity = '0.3';
                     icon.style.filter = 'grayscale(100%)';
                     icon.style.border = '1px solid #ccc';
                     icon.style.boxShadow = 'none';
                 }
+                // If not visible, don't update styles since the <li> is hidden
             }
         });
         
@@ -482,6 +483,20 @@
                 }
             }
         });
+        
+        // Update count badges visibility based on filter state
+        document.querySelectorAll('.set-count-badge').forEach(badge => {
+            const iconContainer = badge.closest('.set-summary-icon-container');
+            const icon = iconContainer?.querySelector('.set-summary-icon');
+            if (icon) {
+                const setCode = icon.getAttribute('data-set-code');
+                if (activeSetCode === null || setCode === activeSetCode) {
+                    badge.style.display = 'flex';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        });
     }
     
     // Function to apply set filter
@@ -495,13 +510,24 @@
             // Check if this card has the active set
             const hasActiveSet = sets.some(set => set && set.code === setCode);
             
+            // Find the parent <li> element to hide/show
+            const listItem = element.closest('li');
+            
             if (hasActiveSet) {
-                // Show the card
-                element.style.display = '';
+                // Show the card by showing the <li> element
+                if (listItem) {
+                    listItem.style.display = '';
+                } else {
+                    element.style.display = '';
+                }
                 element.style.opacity = '1';
             } else {
-                // Hide the card
-                element.style.display = 'none';
+                // Hide the card by hiding the <li> element
+                if (listItem) {
+                    listItem.style.display = 'none';
+                } else {
+                    element.style.display = 'none';
+                }
             }
         });
     }
@@ -512,7 +538,14 @@
         
         allCardElements.forEach(cardItem => {
             const element = cardItem.element;
-            element.style.display = '';
+            const listItem = element.closest('li');
+            
+            // Show the card by showing the <li> element
+            if (listItem) {
+                listItem.style.display = '';
+            } else {
+                element.style.display = '';
+            }
             element.style.opacity = '1';
         });
     }
@@ -533,21 +566,40 @@
             align-items: center;
         `;
         
-        // Sort sets to prioritize active set first
+        // Get card counts per set for tooltips
+        const cardCountsPerSet = getCardCountPerSet();
+        
+        // Sort sets to prioritize active set first, then by card count (highest first)
         const sortedSets = [...sets].sort((a, b) => {
             if (activeSetCode && a.code === activeSetCode) return -1;
             if (activeSetCode && b.code === activeSetCode) return 1;
-            return 0;
+            
+            // Sort by card count (highest first), then by release date (newest first) as tiebreaker
+            const countA = cardCountsPerSet.get(a.code) || 0;
+            const countB = cardCountsPerSet.get(b.code) || 0;
+            
+            if (countA !== countB) {
+                return countB - countA; // Higher count first
+            }
+            
+            // If counts are equal, sort by release date (newest first)
+            return new Date(b.releaseDate) - new Date(a.releaseDate);
         });
         
         const displayedSets = sortedSets.slice(0, maxDisplay);
         
         displayedSets.forEach(set => {
+            // Skip digital-only sets if configured to exclude them
+            if (EXCLUDE_DIGITAL_SETS && set.digital) {
+                return;
+            }
+            
             if (set.iconUri) {
+                const cardCount = cardCountsPerSet.get(set.code) || 0;
                 const iconImg = document.createElement('img');
                 iconImg.src = set.iconUri;
                 iconImg.alt = set.name;
-                iconImg.title = `${set.name} (${set.code}) - Click to filter by this set`;
+                iconImg.title = `${set.name} (${set.code}) - ${cardCount} card${cardCount !== 1 ? 's' : ''} in deck - Click to filter by this set`;
                 iconImg.className = 'set-icon';
                 iconImg.setAttribute('data-set-code', set.code);
                 iconImg.style.cssText = `
@@ -607,11 +659,34 @@
         return container;
     }
     
+    // Function to count cards per set in the deck
+    function getCardCountPerSet() {
+        const setCardCounts = new Map();
+        
+        // Count cards for each set
+        allCardElements.forEach(cardItem => {
+            if (cardItem.sets && cardItem.sets.length > 0) {
+                cardItem.sets.forEach(set => {
+                    if (set && set.code) {
+                        const currentCount = setCardCounts.get(set.code) || 0;
+                        setCardCounts.set(set.code, currentCount + 1);
+                    }
+                });
+            }
+        });
+        
+        return setCardCounts;
+    }
+
     // Function to create summary display of all fetched sets
     function createSetSummary() {
         if (allFetchedSets.size === 0) {
             return null;
         }
+        
+        // Get card counts per set
+        const cardCountsPerSet = getCardCountPerSet();
+        
         
         const summaryContainer = document.createElement('div');
         summaryContainer.className = 'set-summary-container';
@@ -635,8 +710,13 @@
             align-items: center;
         `;
         
+        // Count only non-digital sets for display
+        const displayedSetsCount = Array.from(allFetchedSets.values()).filter(set => 
+            !EXCLUDE_DIGITAL_SETS || !set.digital
+        ).length;
+        
         const titleText = document.createElement('span');
-        titleText.textContent = `Sets in this deck (${allFetchedSets.size} unique sets)`;
+        titleText.textContent = `Sets in this deck (${displayedSetsCount} unique sets)`;
         title.appendChild(titleText);
         
         // Add control buttons
@@ -731,23 +811,47 @@
             align-items: center;
         `;
         
-        // Sort sets by release date (newest first), but prioritize active set
+        // Sort sets by card count (highest first), but prioritize active set
         const sortedSets = Array.from(allFetchedSets.values()).sort((a, b) => {
             // If there's an active set, prioritize it first
             if (activeSetCode) {
                 if (a.code === activeSetCode) return -1;
                 if (b.code === activeSetCode) return 1;
             }
-            // Otherwise sort by release date (newest first)
+            // Otherwise sort by card count (highest first), then by release date (newest first) as tiebreaker
+            const countA = cardCountsPerSet.get(a.code) || 0;
+            const countB = cardCountsPerSet.get(b.code) || 0;
+            
+            if (countA !== countB) {
+                return countB - countA; // Higher count first
+            }
+            
+            // If counts are equal, sort by release date (newest first)
             return new Date(b.releaseDate) - new Date(a.releaseDate);
         });
         
+        
         sortedSets.forEach(set => {
+            // Skip digital-only sets in summary if configured to exclude them
+            if (EXCLUDE_DIGITAL_SETS && set.digital) {
+                return;
+            }
+            
             if (set.iconUri) {
+                const cardCount = cardCountsPerSet.get(set.code) || 0;
+                
+                // Create container for icon and count badge
+                const iconContainer = document.createElement('div');
+                iconContainer.className = 'set-summary-icon-container';
+                iconContainer.style.cssText = `
+                    position: relative;
+                    display: inline-block;
+                `;
+                
                 const iconImg = document.createElement('img');
                 iconImg.src = set.iconUri;
                 iconImg.alt = set.name;
-                iconImg.title = `${set.name} (${set.code}) - Click to filter by this set`;
+                iconImg.title = `${set.name} (${set.code}) - ${cardCount} card${cardCount !== 1 ? 's' : ''} in deck - Click to filter by this set`;
                 iconImg.className = 'set-summary-icon';
                 iconImg.setAttribute('data-set-code', set.code);
                 iconImg.style.cssText = `
@@ -759,6 +863,34 @@
                     transition: transform 0.2s ease, box-shadow 0.2s ease;
                     cursor: pointer;
                 `;
+                
+                // Add count badge if there are cards in this set
+                if (cardCount > 0) {
+                    const countBadge = document.createElement('div');
+                    countBadge.textContent = cardCount;
+                    countBadge.className = 'set-count-badge';
+                    countBadge.style.cssText = `
+                        position: absolute;
+                        top: -6px;
+                        right: -6px;
+                        background: #007bff;
+                        color: white;
+                        border-radius: 50%;
+                        width: 16px;
+                        height: 16px;
+                        font-size: 10px;
+                        font-weight: bold;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        border: 2px solid white;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+                        z-index: 5;
+                    `;
+                    iconContainer.appendChild(countBadge);
+                }
+                
+                iconContainer.appendChild(iconImg);
                 
                 // Add click handler
                 iconImg.addEventListener('click', (e) => {
@@ -787,7 +919,7 @@
                     iconImg.style.display = 'none';
                 });
                 
-                iconsContainer.appendChild(iconImg);
+                iconsContainer.appendChild(iconContainer);
             }
         });
         
@@ -829,11 +961,17 @@
                 if (insertionPoint.reference) {
                     // Insert just before the deckview section
                     insertionPoint.parent.insertBefore(summary, insertionPoint.reference);
-                    console.log(`📊 Displayed summary with ${allFetchedSets.size} unique sets just before .deckview section`);
+                    const displayedCount = Array.from(allFetchedSets.values()).filter(set => 
+                        !EXCLUDE_DIGITAL_SETS || !set.digital
+                    ).length;
+                    console.log(`📊 Displayed summary with ${displayedCount} unique sets just before .deckview section`);
                 } else {
                     // Fallback: append to parent
                     insertionPoint.parent.appendChild(summary);
-                    console.log(`📊 Displayed summary with ${allFetchedSets.size} unique sets (fallback location)`);
+                    const displayedCount = Array.from(allFetchedSets.values()).filter(set => 
+                        !EXCLUDE_DIGITAL_SETS || !set.digital
+                    ).length;
+                    console.log(`📊 Displayed summary with ${displayedCount} unique sets (fallback location)`);
                 }
             }
         }
@@ -1082,6 +1220,13 @@
 
         if (cardsProcessed > 0) {
             console.log(`✅ Processed ${cardsProcessed} cards (set icons + excluded cards)`);
+            if (EXCLUDE_DIGITAL_SETS && excludedDigitalSetsCount > 0) {
+                const displayedCount = Array.from(allFetchedSets.values()).filter(set => 
+                    !EXCLUDE_DIGITAL_SETS || !set.digital
+                ).length;
+                console.log(`🚫 Excluded ${excludedDigitalSetsCount} digital-only sets (MTG Arena/Online)`);
+                console.log(`📊 Total sets fetched: ${allFetchedSets.size}, Displayed: ${displayedCount}`);
+            }
             hasProcessedCards = true; // Mark as processed
             
             // Update set icon states after processing
@@ -1157,7 +1302,7 @@
                     // Remove old container
                     container.remove();
                     
-                    // Create new container with updated priority
+                    // Create new container with updated priority and card counts
                     const newContainer = createSetIconsContainer(cardItem.sets);
                     if (newContainer) {
                         parent.appendChild(newContainer);
