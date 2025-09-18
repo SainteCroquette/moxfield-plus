@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Deck Card Injector
+// @name         Moxfield Plus - Card Set Information
 // @namespace    https://github.com/SainteCroquette
-// @version      1.0.0
-// @description  Adds 'INJECT' text next to every card name in Moxfield deck lists
-// @author       You
+// @version      2.0.0
+// @description  Shows all sets each card was printed in on Moxfield deck lists using Scryfall API
+// @author       SainteCroquette
 // @match        https://www.moxfield.com/decks/*
 // @match        www.moxfield.com/decks/*
 // @match        moxfield.com/decks/*
@@ -14,14 +14,97 @@
 (function () {
     'use strict';
 
-    console.log("=== Deck Card Injector script enabled on this page ===");
+    console.log("=== Moxfield Plus - Card Set Information script enabled on this page ===");
     console.log("Current URL:", window.location.href);
     console.log("Script started at:", new Date().toISOString());
 
     // Flag to prevent infinite loops
     let hasProcessedCards = false;
     let isProcessing = false;
+    
+    // Cache for card set data to avoid duplicate API calls
+    const cardSetCache = new Map();
+    
+    // Rate limiting: delay between API requests (50-100ms as per Scryfall guidelines)
+    const API_DELAY = 75; // milliseconds
 
+    // Function to fetch card sets from Scryfall API
+    async function fetchCardSets(cardName) {
+        // Check cache first
+        if (cardSetCache.has(cardName)) {
+            return cardSetCache.get(cardName);
+        }
+        
+        const encodedName = encodeURIComponent(cardName);
+        const url = `https://api.scryfall.com/cards/search?q=!"${encodedName}"&unique=prints`;
+        
+        try {
+            console.log(`Fetching sets for: ${cardName}`);
+            const response = await fetch(url, {
+                headers: {
+                    'User-Agent': 'MoxfieldPlus/1.0.0',
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.object === 'error') {
+                throw new Error(`Scryfall API error: ${data.details}`);
+            }
+            
+            // Extract unique sets from the response
+            const sets = new Map();
+            data.data.forEach(card => {
+                if (card.set && card.set_name) {
+                    sets.set(card.set, {
+                        code: card.set,
+                        name: card.set_name,
+                        releaseDate: card.released_at
+                    });
+                }
+            });
+            
+            const setList = Array.from(sets.values()).sort((a, b) => 
+                new Date(b.releaseDate) - new Date(a.releaseDate)
+            );
+            
+            // Cache the result
+            cardSetCache.set(cardName, setList);
+            return setList;
+            
+        } catch (error) {
+            console.error(`Error fetching sets for ${cardName}:`, error);
+            // Cache empty result to avoid retrying failed requests
+            cardSetCache.set(cardName, []);
+            return [];
+        }
+    }
+    
+    // Function to create a delay for rate limiting
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    // Function to format sets for display
+    function formatSetsForDisplay(sets, maxDisplay = 5) {
+        if (sets.length === 0) {
+            return 'No sets found';
+        }
+        
+        if (sets.length <= maxDisplay) {
+            return sets.map(set => `${set.name} (${set.code})`).join(', ');
+        }
+        
+        const displayed = sets.slice(0, maxDisplay);
+        const remaining = sets.length - maxDisplay;
+        return displayed.map(set => `${set.name} (${set.code})`).join(', ') + 
+               ` +${remaining} more`;
+    }
 
     // Function to find card names using the correct selectors
     function findCardNames() {
@@ -92,8 +175,8 @@
         return cardElements;
     }
 
-    // Function to add 'INJECT' text next to card names
-    function addInjectToCards() {
+    // Function to add set information next to card names
+    async function addSetInfoToCards() {
         // Prevent infinite loops
         if (isProcessing) {
             return 0;
@@ -113,47 +196,112 @@
             return 0;
         }
         
-        let cardsFound = 0;
+        let cardsProcessed = 0;
         
-        cardElements.forEach((cardItem, index) => {
+        // Process cards sequentially with rate limiting
+        for (let i = 0; i < cardElements.length; i++) {
+            const cardItem = cardElements[i];
             const element = cardItem.element;
             const text = cardItem.text;
             const type = cardItem.type;
             
-            // Check if we already added 'INJECT' to this card
-            if (!element.querySelector('.inject-text') && !element.textContent.includes('INJECT')) {
-                const injectSpan = document.createElement('span');
-                injectSpan.textContent = ' INJECT';
-                injectSpan.className = 'inject-text';
-                injectSpan.style.color = '#ff6b6b';
-                injectSpan.style.fontWeight = 'bold';
-                injectSpan.style.marginLeft = '4px';
+            // Check if we already added set info to this card
+            if (!element.querySelector('.set-info') && !element.textContent.includes('Sets:')) {
+                // Add loading indicator
+                const loadingSpan = document.createElement('span');
+                loadingSpan.textContent = ' Loading sets...';
+                loadingSpan.className = 'set-info loading';
+                loadingSpan.style.color = '#666';
+                loadingSpan.style.fontSize = '0.8em';
+                loadingSpan.style.marginLeft = '4px';
                 
-                // For sample hand cards (img elements), we need to add the text after the image
+                // Add loading indicator to the element
                 if (type === 'sample-hand') {
-                    // Find the parent container and add text after the image
                     const parent = element.parentElement;
                     if (parent) {
-                        parent.appendChild(injectSpan);
+                        parent.appendChild(loadingSpan);
                     } else {
-                        element.parentNode.insertBefore(injectSpan, element.nextSibling);
+                        element.parentNode.insertBefore(loadingSpan, element.nextSibling);
                     }
                 } else {
-                    // For deck list and commander cards (link elements), append to the link
-                    element.appendChild(injectSpan);
+                    element.appendChild(loadingSpan);
                 }
                 
-                cardsFound++;
+                try {
+                    // Fetch sets for this card
+                    const sets = await fetchCardSets(text);
+                    
+                    // Remove loading indicator
+                    loadingSpan.remove();
+                    
+                    // Create set info display
+                    const setInfoSpan = document.createElement('span');
+                    setInfoSpan.className = 'set-info';
+                    setInfoSpan.style.color = '#2c5aa0';
+                    setInfoSpan.style.fontSize = '0.8em';
+                    setInfoSpan.style.marginLeft = '4px';
+                    setInfoSpan.style.display = 'block';
+                    setInfoSpan.style.lineHeight = '1.2';
+                    
+                    if (sets.length > 0) {
+                        const formattedSets = formatSetsForDisplay(sets);
+                        setInfoSpan.innerHTML = `<strong>Sets:</strong> ${formattedSets}`;
+                    } else {
+                        setInfoSpan.innerHTML = '<strong>Sets:</strong> <em>No sets found</em>';
+                    }
+                    
+                    // Add set info to the element
+                    if (type === 'sample-hand') {
+                        const parent = element.parentElement;
+                        if (parent) {
+                            parent.appendChild(setInfoSpan);
+                        } else {
+                            element.parentNode.insertBefore(setInfoSpan, element.nextSibling);
+                        }
+                    } else {
+                        element.appendChild(setInfoSpan);
+                    }
+                    
+                    cardsProcessed++;
+                    
+                } catch (error) {
+                    console.error(`Error processing card ${text}:`, error);
+                    // Remove loading indicator and add error message
+                    loadingSpan.remove();
+                    
+                    const errorSpan = document.createElement('span');
+                    errorSpan.textContent = ' Error loading sets';
+                    errorSpan.className = 'set-info error';
+                    errorSpan.style.color = '#ff6b6b';
+                    errorSpan.style.fontSize = '0.8em';
+                    errorSpan.style.marginLeft = '4px';
+                    
+                    if (type === 'sample-hand') {
+                        const parent = element.parentElement;
+                        if (parent) {
+                            parent.appendChild(errorSpan);
+                        } else {
+                            element.parentNode.insertBefore(errorSpan, element.nextSibling);
+                        }
+                    } else {
+                        element.appendChild(errorSpan);
+                    }
+                }
+                
+                // Rate limiting: delay between API requests
+                if (i < cardElements.length - 1) {
+                    await delay(API_DELAY);
+                }
             }
-        });
+        }
 
-        if (cardsFound > 0) {
-            console.log(`✅ Added 'INJECT' to ${cardsFound} cards`);
+        if (cardsProcessed > 0) {
+            console.log(`✅ Added set information to ${cardsProcessed} cards`);
             hasProcessedCards = true; // Mark as processed
         }
 
         isProcessing = false;
-        return cardsFound;
+        return cardsProcessed;
     }
 
     // Function to monitor for new cards being added (for dynamic content)
@@ -170,7 +318,7 @@
                     // Only check if significant content was added (not just our injected elements)
                     const hasSignificantContent = Array.from(mutation.addedNodes).some(node => 
                         node.nodeType === Node.ELEMENT_NODE && 
-                        !node.classList?.contains('inject-text')
+                        !node.classList?.contains('set-info')
                     );
                     if (hasSignificantContent) {
                         shouldCheck = true;
@@ -179,7 +327,7 @@
             });
             
             if (shouldCheck) {
-                addInjectToCards();
+                addSetInfoToCards();
             }
         });
 
@@ -193,13 +341,13 @@
     }
 
     // Main function to initialize the script
-    function initialize() {
+    async function initialize() {
         console.log("Deck Card Injector: Starting...");
         
         // Wait 2 seconds for the page to fully load before starting
-        setTimeout(() => {
-            // Add 'INJECT' to existing cards
-            addInjectToCards();
+        setTimeout(async () => {
+            // Add set information to existing cards
+            await addSetInfoToCards();
             
             // Start monitoring for new cards
             startCardMonitoring();
