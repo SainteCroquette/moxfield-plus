@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Moxfield Plus - Card Set Information
 // @namespace    https://github.com/SainteCroquette
-// @version      2.4.0
-// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting. Excludes basic lands. Displays summary of all sets at top of deck list.
+// @version      2.5.1
+// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting. Excludes basic lands. Displays real-time summary of all sets just before .deckview section.
 // @author       SainteCroquette
 // @match        https://www.moxfield.com/decks/*
 // @match        www.moxfield.com/decks/*
@@ -96,11 +96,20 @@
             );
             
             // Track sets in global map for summary display
+            let hasNewSets = false;
             setList.forEach(set => {
-                if (set.iconUri) {
+                if (set.iconUri && !allFetchedSets.has(set.code)) {
                     allFetchedSets.set(set.code, set);
+                    hasNewSets = true;
                 }
             });
+            
+            // Update summary in real-time if new sets were discovered
+            if (hasNewSets) {
+                setTimeout(() => {
+                    displaySetSummary();
+                }, 100); // Small delay to batch updates
+            }
             
             // Cache the result
             cardSetCache.set(cardName, setList);
@@ -179,6 +188,15 @@
             
             // Cache the result
             setDetailsCache.set(setCode, setInfo);
+            
+            // Add to global sets map and update summary if it's a new set
+            if (setInfo && setInfo.iconUri && !allFetchedSets.has(setCode)) {
+                allFetchedSets.set(setCode, setInfo);
+                setTimeout(() => {
+                    displaySetSummary();
+                }, 100); // Small delay to batch updates
+            }
+            
             return setInfo;
             
         } catch (error) {
@@ -349,27 +367,23 @@
         return summaryContainer;
     }
     
-    // Function to find the best location to insert the summary
+    // Function to find the insertion point just before the deckview section
     function findSummaryInsertionPoint() {
-        // Try to find the deck list container
-        const deckListSelectors = [
-            '.deck-list',
-            '.deck-list-container',
-            '.table-deck',
-            '.deck-cards',
-            '[class*="deck"]',
-            '.main-content'
-        ];
-        
-        for (const selector of deckListSelectors) {
-            const element = document.querySelector(selector);
-            if (element) {
-                return element;
-            }
+        // Target the .deckview section and insert just before it
+        const deckviewSection = document.querySelector('.deckview');
+        if (deckviewSection) {
+            return {
+                parent: deckviewSection.parentElement,
+                reference: deckviewSection
+            };
         }
         
-        // Fallback to body
-        return document.body;
+        // Fallback to body if deckview not found
+        console.warn('Could not find .deckview section, falling back to body');
+        return {
+            parent: document.body,
+            reference: null
+        };
     }
     
     // Function to display the set summary
@@ -383,10 +397,16 @@
         const summary = createSetSummary();
         if (summary) {
             const insertionPoint = findSummaryInsertionPoint();
-            if (insertionPoint) {
-                // Insert at the beginning of the container
-                insertionPoint.insertBefore(summary, insertionPoint.firstChild);
-                console.log(`📊 Displayed summary with ${allFetchedSets.size} unique sets`);
+            if (insertionPoint && insertionPoint.parent) {
+                if (insertionPoint.reference) {
+                    // Insert just before the deckview section
+                    insertionPoint.parent.insertBefore(summary, insertionPoint.reference);
+                    console.log(`📊 Displayed summary with ${allFetchedSets.size} unique sets just before .deckview section`);
+                } else {
+                    // Fallback: append to parent
+                    insertionPoint.parent.appendChild(summary);
+                    console.log(`📊 Displayed summary with ${allFetchedSets.size} unique sets (fallback location)`);
+                }
             }
         }
     }
@@ -629,11 +649,6 @@
         if (cardsProcessed > 0) {
             console.log(`✅ Processed ${cardsProcessed} cards (set icons + excluded cards)`);
             hasProcessedCards = true; // Mark as processed
-            
-            // Display the set summary after processing all cards
-            setTimeout(() => {
-                displaySetSummary();
-            }, 500); // Small delay to ensure all processing is complete
         }
 
         isProcessing = false;
@@ -665,12 +680,7 @@
             });
             
             if (shouldCheck) {
-                addSetInfoToCards().then(() => {
-                    // Refresh summary after processing new cards
-                    setTimeout(() => {
-                        displaySetSummary();
-                    }, 500);
-                });
+                addSetInfoToCards();
             }
         });
 
