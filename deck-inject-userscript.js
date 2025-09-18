@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Moxfield Plus - Card Set Information
 // @namespace    https://github.com/SainteCroquette
-// @version      2.3.0
-// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting. Excludes basic lands.
+// @version      2.4.0
+// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting. Excludes basic lands. Displays summary of all sets at top of deck list.
 // @author       SainteCroquette
 // @match        https://www.moxfield.com/decks/*
 // @match        www.moxfield.com/decks/*
@@ -36,6 +36,9 @@
     
     // Cards to exclude from set fetching (basic lands)
     const EXCLUDED_CARDS = ['Forest', 'Mountain', 'Plains', 'Island', 'Swamp'];
+    
+    // Track all unique sets that have been fetched for the summary display
+    const allFetchedSets = new Map();
 
     // Function to fetch card sets with icons from Scryfall API
     async function fetchCardSets(cardName) {
@@ -91,6 +94,13 @@
             const setList = setDetails.sort((a, b) => 
                 new Date(b.releaseDate) - new Date(a.releaseDate)
             );
+            
+            // Track sets in global map for summary display
+            setList.forEach(set => {
+                if (set.iconUri) {
+                    allFetchedSets.set(set.code, set);
+                }
+            });
             
             // Cache the result
             cardSetCache.set(cardName, setList);
@@ -251,6 +261,134 @@
         }
         
         return container;
+    }
+    
+    // Function to create summary display of all fetched sets
+    function createSetSummary() {
+        if (allFetchedSets.size === 0) {
+            return null;
+        }
+        
+        const summaryContainer = document.createElement('div');
+        summaryContainer.className = 'set-summary-container';
+        summaryContainer.style.cssText = `
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 16px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        `;
+        
+        const title = document.createElement('div');
+        title.textContent = `Sets in this deck (${allFetchedSets.size} unique sets)`;
+        title.style.cssText = `
+            font-weight: bold;
+            font-size: 14px;
+            color: #495057;
+            margin-bottom: 8px;
+        `;
+        summaryContainer.appendChild(title);
+        
+        const iconsContainer = document.createElement('div');
+        iconsContainer.className = 'set-summary-icons';
+        iconsContainer.style.cssText = `
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        `;
+        
+        // Sort sets by release date (newest first)
+        const sortedSets = Array.from(allFetchedSets.values()).sort((a, b) => 
+            new Date(b.releaseDate) - new Date(a.releaseDate)
+        );
+        
+        sortedSets.forEach(set => {
+            if (set.iconUri) {
+                const iconImg = document.createElement('img');
+                iconImg.src = set.iconUri;
+                iconImg.alt = set.name;
+                iconImg.title = `${set.name} (${set.code})`;
+                iconImg.className = 'set-summary-icon';
+                iconImg.style.cssText = `
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 4px;
+                    border: 1px solid #ddd;
+                    background: white;
+                    transition: transform 0.2s ease, box-shadow 0.2s ease;
+                    cursor: pointer;
+                `;
+                
+                // Add hover effect
+                iconImg.addEventListener('mouseenter', () => {
+                    iconImg.style.transform = 'scale(1.1)';
+                    iconImg.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+                    iconImg.style.zIndex = '10';
+                    iconImg.style.position = 'relative';
+                });
+                
+                iconImg.addEventListener('mouseleave', () => {
+                    iconImg.style.transform = 'scale(1)';
+                    iconImg.style.boxShadow = 'none';
+                    iconImg.style.zIndex = '1';
+                });
+                
+                // Add error handling for failed image loads
+                iconImg.addEventListener('error', () => {
+                    console.warn(`Failed to load summary icon for set: ${set.name}`);
+                    iconImg.style.display = 'none';
+                });
+                
+                iconsContainer.appendChild(iconImg);
+            }
+        });
+        
+        summaryContainer.appendChild(iconsContainer);
+        return summaryContainer;
+    }
+    
+    // Function to find the best location to insert the summary
+    function findSummaryInsertionPoint() {
+        // Try to find the deck list container
+        const deckListSelectors = [
+            '.deck-list',
+            '.deck-list-container',
+            '.table-deck',
+            '.deck-cards',
+            '[class*="deck"]',
+            '.main-content'
+        ];
+        
+        for (const selector of deckListSelectors) {
+            const element = document.querySelector(selector);
+            if (element) {
+                return element;
+            }
+        }
+        
+        // Fallback to body
+        return document.body;
+    }
+    
+    // Function to display the set summary
+    function displaySetSummary() {
+        // Remove existing summary if it exists
+        const existingSummary = document.querySelector('.set-summary-container');
+        if (existingSummary) {
+            existingSummary.remove();
+        }
+        
+        const summary = createSetSummary();
+        if (summary) {
+            const insertionPoint = findSummaryInsertionPoint();
+            if (insertionPoint) {
+                // Insert at the beginning of the container
+                insertionPoint.insertBefore(summary, insertionPoint.firstChild);
+                console.log(`📊 Displayed summary with ${allFetchedSets.size} unique sets`);
+            }
+        }
     }
 
     // Function to find card names using the correct selectors
@@ -491,6 +629,11 @@
         if (cardsProcessed > 0) {
             console.log(`✅ Processed ${cardsProcessed} cards (set icons + excluded cards)`);
             hasProcessedCards = true; // Mark as processed
+            
+            // Display the set summary after processing all cards
+            setTimeout(() => {
+                displaySetSummary();
+            }, 500); // Small delay to ensure all processing is complete
         }
 
         isProcessing = false;
@@ -522,7 +665,12 @@
             });
             
             if (shouldCheck) {
-                addSetInfoToCards();
+                addSetInfoToCards().then(() => {
+                    // Refresh summary after processing new cards
+                    setTimeout(() => {
+                        displaySetSummary();
+                    }, 500);
+                });
             }
         });
 
