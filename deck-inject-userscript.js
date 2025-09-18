@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Moxfield Plus - Card Set Information
 // @namespace    https://github.com/SainteCroquette
-// @version      2.0.0
-// @description  Shows all sets each card was printed in on Moxfield deck lists using Scryfall API
+// @version      2.2.0
+// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting
 // @author       SainteCroquette
 // @match        https://www.moxfield.com/decks/*
 // @match        www.moxfield.com/decks/*
@@ -25,10 +25,16 @@
     // Cache for card set data to avoid duplicate API calls
     const cardSetCache = new Map();
     
+    // Global cache for set details to avoid refetching set information
+    const setDetailsCache = new Map();
+    
     // Rate limiting: delay between API requests (50-100ms as per Scryfall guidelines)
-    const API_DELAY = 75; // milliseconds
+    const API_DELAY = 100; // milliseconds - using higher end of range for safety
+    
+    // Track last API request time to ensure proper rate limiting
+    let lastApiRequestTime = 0;
 
-    // Function to fetch card sets from Scryfall API
+    // Function to fetch card sets with icons from Scryfall API
     async function fetchCardSets(cardName) {
         // Check cache first
         if (cardSetCache.has(cardName)) {
@@ -40,12 +46,7 @@
         
         try {
             console.log(`Fetching sets for: ${cardName}`);
-            const response = await fetch(url, {
-                headers: {
-                    'User-Agent': 'MoxfieldPlus/1.0.0',
-                    'Accept': 'application/json'
-                }
-            });
+            const response = await rateLimitedFetch(url);
             
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -69,7 +70,22 @@
                 }
             });
             
-            const setList = Array.from(sets.values()).sort((a, b) => 
+            // Fetch set details with proper rate limiting and caching
+            const setDetails = [];
+            for (const set of sets.values()) {
+                const setInfo = await fetchSetDetails(set.code);
+                if (setInfo) {
+                    setDetails.push(setInfo);
+                } else {
+                    // Fallback to basic info if set details fetch failed
+                    setDetails.push({
+                        ...set,
+                        iconUri: null
+                    });
+                }
+            }
+            
+            const setList = setDetails.sort((a, b) => 
                 new Date(b.releaseDate) - new Date(a.releaseDate)
             );
             
@@ -90,20 +106,148 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
     
-    // Function to format sets for display
-    function formatSetsForDisplay(sets, maxDisplay = 5) {
+    // Rate-limited fetch function that ensures proper delays between API calls
+    async function rateLimitedFetch(url, options = {}) {
+        const now = Date.now();
+        const timeSinceLastRequest = now - lastApiRequestTime;
+        
+        if (timeSinceLastRequest < API_DELAY) {
+            const delayNeeded = API_DELAY - timeSinceLastRequest;
+            console.log(`Rate limiting: waiting ${delayNeeded}ms before next request to ${url}`);
+            await delay(delayNeeded);
+        }
+        
+        lastApiRequestTime = Date.now();
+        console.log(`Making API request to: ${url}`);
+        
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'User-Agent': 'MoxfieldPlus/1.0.0',
+                'Accept': 'application/json',
+                ...options.headers
+            }
+        });
+        
+        if (response.status === 429) {
+            console.error('Rate limit exceeded! Waiting 5 seconds before continuing...');
+            await delay(5000); // Wait 5 seconds if rate limited
+        }
+        
+        return response;
+    }
+    
+    // Function to fetch set details with caching
+    async function fetchSetDetails(setCode) {
+        // Check global set cache first
+        if (setDetailsCache.has(setCode)) {
+            return setDetailsCache.get(setCode);
+        }
+        
+        try {
+            const response = await rateLimitedFetch(`https://api.scryfall.com/sets/${setCode}`);
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const setData = await response.json();
+            
+            if (setData.object === 'error') {
+                throw new Error(`Scryfall API error: ${setData.details}`);
+            }
+            
+            const setInfo = {
+                code: setData.code,
+                name: setData.name,
+                iconUri: setData.icon_svg_uri,
+                releaseDate: setData.released_at
+            };
+            
+            // Cache the result
+            setDetailsCache.set(setCode, setInfo);
+            return setInfo;
+            
+        } catch (error) {
+            console.warn(`Failed to fetch set details for ${setCode}:`, error);
+            // Cache empty result to avoid retrying failed requests
+            setDetailsCache.set(setCode, null);
+            return null;
+        }
+    }
+    
+    // Function to create set icons container
+    function createSetIconsContainer(sets, maxDisplay = 8) {
         if (sets.length === 0) {
-            return 'No sets found';
+            return null;
         }
         
-        if (sets.length <= maxDisplay) {
-            return sets.map(set => `${set.name} (${set.code})`).join(', ');
+        const container = document.createElement('div');
+        container.className = 'set-icons-container';
+        container.style.cssText = `
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            margin-top: 4px;
+            align-items: center;
+        `;
+        
+        const displayedSets = sets.slice(0, maxDisplay);
+        
+        displayedSets.forEach(set => {
+            if (set.iconUri) {
+                const iconImg = document.createElement('img');
+                iconImg.src = set.iconUri;
+                iconImg.alt = set.name;
+                iconImg.title = `${set.name} (${set.code})`;
+                iconImg.className = 'set-icon';
+                iconImg.style.cssText = `
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 3px;
+                    border: 1px solid #ddd;
+                    background: white;
+                    transition: transform 0.2s ease;
+                `;
+                
+                // Add hover effect
+                iconImg.addEventListener('mouseenter', () => {
+                    iconImg.style.transform = 'scale(1.1)';
+                    iconImg.style.zIndex = '10';
+                    iconImg.style.position = 'relative';
+                });
+                
+                iconImg.addEventListener('mouseleave', () => {
+                    iconImg.style.transform = 'scale(1)';
+                    iconImg.style.zIndex = '1';
+                });
+                
+                // Add error handling for failed image loads
+                iconImg.addEventListener('error', () => {
+                    console.warn(`Failed to load icon for set: ${set.name}`);
+                    iconImg.style.display = 'none';
+                });
+                
+                container.appendChild(iconImg);
+            }
+        });
+        
+        // Add "+X more" indicator if there are more sets
+        if (sets.length > maxDisplay) {
+            const moreIndicator = document.createElement('span');
+            moreIndicator.textContent = `+${sets.length - maxDisplay}`;
+            moreIndicator.className = 'more-sets-indicator';
+            moreIndicator.style.cssText = `
+                font-size: 0.7em;
+                color: #666;
+                margin-left: 4px;
+                font-weight: bold;
+            `;
+            moreIndicator.title = `${sets.length - maxDisplay} more sets`;
+            container.appendChild(moreIndicator);
         }
         
-        const displayed = sets.slice(0, maxDisplay);
-        const remaining = sets.length - maxDisplay;
-        return displayed.map(set => `${set.name} (${set.code})`).join(', ') + 
-               ` +${remaining} more`;
+        return container;
     }
 
     // Function to find card names using the correct selectors
@@ -206,14 +350,17 @@
             const type = cardItem.type;
             
             // Check if we already added set info to this card
-            if (!element.querySelector('.set-info') && !element.textContent.includes('Sets:')) {
+            if (!element.querySelector('.set-icons-container') && !element.querySelector('.set-info')) {
                 // Add loading indicator
                 const loadingSpan = document.createElement('span');
-                loadingSpan.textContent = ' Loading sets...';
+                loadingSpan.textContent = ' Loading set icons...';
                 loadingSpan.className = 'set-info loading';
-                loadingSpan.style.color = '#666';
-                loadingSpan.style.fontSize = '0.8em';
-                loadingSpan.style.marginLeft = '4px';
+                loadingSpan.style.cssText = `
+                    color: #666;
+                    font-size: 0.8em;
+                    margin-left: 4px;
+                    font-style: italic;
+                `;
                 
                 // Add loading indicator to the element
                 if (type === 'sample-hand') {
@@ -234,32 +381,45 @@
                     // Remove loading indicator
                     loadingSpan.remove();
                     
-                    // Create set info display
-                    const setInfoSpan = document.createElement('span');
-                    setInfoSpan.className = 'set-info';
-                    setInfoSpan.style.color = '#2c5aa0';
-                    setInfoSpan.style.fontSize = '0.8em';
-                    setInfoSpan.style.marginLeft = '4px';
-                    setInfoSpan.style.display = 'block';
-                    setInfoSpan.style.lineHeight = '1.2';
-                    
                     if (sets.length > 0) {
-                        const formattedSets = formatSetsForDisplay(sets);
-                        setInfoSpan.innerHTML = `<strong>Sets:</strong> ${formattedSets}`;
-                    } else {
-                        setInfoSpan.innerHTML = '<strong>Sets:</strong> <em>No sets found</em>';
-                    }
-                    
-                    // Add set info to the element
-                    if (type === 'sample-hand') {
-                        const parent = element.parentElement;
-                        if (parent) {
-                            parent.appendChild(setInfoSpan);
-                        } else {
-                            element.parentNode.insertBefore(setInfoSpan, element.nextSibling);
+                        // Create set icons container
+                        const iconsContainer = createSetIconsContainer(sets);
+                        
+                        if (iconsContainer) {
+                            // Add set icons to the element
+                            if (type === 'sample-hand') {
+                                const parent = element.parentElement;
+                                if (parent) {
+                                    parent.appendChild(iconsContainer);
+                                } else {
+                                    element.parentNode.insertBefore(iconsContainer, element.nextSibling);
+                                }
+                            } else {
+                                element.appendChild(iconsContainer);
+                            }
                         }
                     } else {
-                        element.appendChild(setInfoSpan);
+                        // Show "No sets found" message
+                        const noSetsSpan = document.createElement('span');
+                        noSetsSpan.textContent = 'No sets found';
+                        noSetsSpan.className = 'set-info no-sets';
+                        noSetsSpan.style.cssText = `
+                            color: #999;
+                            font-size: 0.8em;
+                            margin-left: 4px;
+                            font-style: italic;
+                        `;
+                        
+                        if (type === 'sample-hand') {
+                            const parent = element.parentElement;
+                            if (parent) {
+                                parent.appendChild(noSetsSpan);
+                            } else {
+                                element.parentNode.insertBefore(noSetsSpan, element.nextSibling);
+                            }
+                        } else {
+                            element.appendChild(noSetsSpan);
+                        }
                     }
                     
                     cardsProcessed++;
@@ -270,11 +430,14 @@
                     loadingSpan.remove();
                     
                     const errorSpan = document.createElement('span');
-                    errorSpan.textContent = ' Error loading sets';
+                    errorSpan.textContent = 'Error loading sets';
                     errorSpan.className = 'set-info error';
-                    errorSpan.style.color = '#ff6b6b';
-                    errorSpan.style.fontSize = '0.8em';
-                    errorSpan.style.marginLeft = '4px';
+                    errorSpan.style.cssText = `
+                        color: #ff6b6b;
+                        font-size: 0.8em;
+                        margin-left: 4px;
+                        font-style: italic;
+                    `;
                     
                     if (type === 'sample-hand') {
                         const parent = element.parentElement;
@@ -287,16 +450,11 @@
                         element.appendChild(errorSpan);
                     }
                 }
-                
-                // Rate limiting: delay between API requests
-                if (i < cardElements.length - 1) {
-                    await delay(API_DELAY);
-                }
             }
         }
 
         if (cardsProcessed > 0) {
-            console.log(`✅ Added set information to ${cardsProcessed} cards`);
+            console.log(`✅ Added set icons to ${cardsProcessed} cards`);
             hasProcessedCards = true; // Mark as processed
         }
 
@@ -318,7 +476,8 @@
                     // Only check if significant content was added (not just our injected elements)
                     const hasSignificantContent = Array.from(mutation.addedNodes).some(node => 
                         node.nodeType === Node.ELEMENT_NODE && 
-                        !node.classList?.contains('set-info')
+                        !node.classList?.contains('set-info') &&
+                        !node.classList?.contains('set-icons-container')
                     );
                     if (hasSignificantContent) {
                         shouldCheck = true;
