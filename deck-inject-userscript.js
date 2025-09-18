@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Moxfield Plus - Card Set Information
 // @namespace    https://github.com/SainteCroquette
-// @version      2.2.0
-// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting
+// @version      2.3.0
+// @description  Shows set icons for all sets each card was printed in on Moxfield deck lists using Scryfall API with proper rate limiting. Excludes basic lands.
 // @author       SainteCroquette
 // @match        https://www.moxfield.com/decks/*
 // @match        www.moxfield.com/decks/*
@@ -33,6 +33,9 @@
     
     // Track last API request time to ensure proper rate limiting
     let lastApiRequestTime = 0;
+    
+    // Cards to exclude from set fetching (basic lands)
+    const EXCLUDED_CARDS = ['Forest', 'Mountain', 'Plains', 'Island', 'Swamp'];
 
     // Function to fetch card sets with icons from Scryfall API
     async function fetchCardSets(cardName) {
@@ -351,6 +354,38 @@
             
             // Check if we already added set info to this card
             if (!element.querySelector('.set-icons-container') && !element.querySelector('.set-info')) {
+                
+                // Check if this card should be excluded
+                if (EXCLUDED_CARDS.includes(text)) {
+                    // Show "excluded" message for basic lands
+                    const excludedSpan = document.createElement('span');
+                    excludedSpan.textContent = 'excluded';
+                    excludedSpan.className = 'set-info excluded';
+                    excludedSpan.style.cssText = `
+                        color: #999;
+                        font-size: 0.8em;
+                        margin-left: 4px;
+                        font-style: italic;
+                        background: #f0f0f0;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                    `;
+                    
+                    if (type === 'sample-hand') {
+                        const parent = element.parentElement;
+                        if (parent) {
+                            parent.appendChild(excludedSpan);
+                        } else {
+                            element.parentNode.insertBefore(excludedSpan, element.nextSibling);
+                        }
+                    } else {
+                        element.appendChild(excludedSpan);
+                    }
+                    
+                    cardsProcessed++;
+                    continue; // Skip to next card
+                }
+                
                 // Add loading indicator
                 const loadingSpan = document.createElement('span');
                 loadingSpan.textContent = ' Loading set icons...';
@@ -454,7 +489,7 @@
         }
 
         if (cardsProcessed > 0) {
-            console.log(`✅ Added set icons to ${cardsProcessed} cards`);
+            console.log(`✅ Processed ${cardsProcessed} cards (set icons + excluded cards)`);
             hasProcessedCards = true; // Mark as processed
         }
 
@@ -477,7 +512,8 @@
                     const hasSignificantContent = Array.from(mutation.addedNodes).some(node => 
                         node.nodeType === Node.ELEMENT_NODE && 
                         !node.classList?.contains('set-info') &&
-                        !node.classList?.contains('set-icons-container')
+                        !node.classList?.contains('set-icons-container') &&
+                        !node.classList?.contains('excluded')
                     );
                     if (hasSignificantContent) {
                         shouldCheck = true;
