@@ -569,12 +569,23 @@
         // Get card counts per set for tooltips
         const cardCountsPerSet = getCardCountPerSet();
         
-        // Sort sets to prioritize active set first, then by card count (highest first)
+        // Find the first set (oldest release date) for this card
+        const firstSet = sets.reduce((oldest, current) => {
+            if (!oldest) return current;
+            return new Date(current.releaseDate) < new Date(oldest.releaseDate) ? current : oldest;
+        }, null);
+        
+        // Sort sets to prioritize: 1) active set, 2) first set, 3) by card count, 4) by release date
         const sortedSets = [...sets].sort((a, b) => {
+            // 1. Active set always comes first
             if (activeSetCode && a.code === activeSetCode) return -1;
             if (activeSetCode && b.code === activeSetCode) return 1;
             
-            // Sort by card count (highest first), then by release date (newest first) as tiebreaker
+            // 2. First set comes second (if not active)
+            if (firstSet && a.code === firstSet.code && a.code !== activeSetCode) return -1;
+            if (firstSet && b.code === firstSet.code && b.code !== activeSetCode) return 1;
+            
+            // 3. Sort by card count (highest first)
             const countA = cardCountsPerSet.get(a.code) || 0;
             const countB = cardCountsPerSet.get(b.code) || 0;
             
@@ -582,7 +593,7 @@
                 return countB - countA; // Higher count first
             }
             
-            // If counts are equal, sort by release date (newest first)
+            // 4. If counts are equal, sort by release date (newest first)
             return new Date(b.releaseDate) - new Date(a.releaseDate);
         });
         
@@ -812,6 +823,8 @@
         `;
         
         // Sort sets by card count (highest first), but prioritize active set
+        // Note: Summary sorting is different from individual card sorting - 
+        // here we prioritize sets that appear most frequently in the deck
         const sortedSets = Array.from(allFetchedSets.values()).sort((a, b) => {
             // If there's an active set, prioritize it first
             if (activeSetCode) {
