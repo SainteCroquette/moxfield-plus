@@ -1,3 +1,7 @@
+> [!NOTE]
+> 🏡 This project's primary home is now on **[Codeberg](https://codeberg.org/SainteCroquette/moxfield-plus)**.
+> Development continues there; this GitHub repository is a mirror and may lag behind.
+
 ### userscript for moxfield
 
 #### Features:
